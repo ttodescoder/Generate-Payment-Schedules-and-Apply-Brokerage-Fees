@@ -1,0 +1,153 @@
+import datetime as dt
+import calendar
+import pandas as pd
+import holidays
+from datetime import datetime as newdt
+
+# Function to convert date string to timestamp
+def convert_to_timestamp(date_str):
+    return pd.to_datetime(date_str)
+
+# Function to check if a given date is a holiday in Brazil
+def check_holiday(date):
+    br_holidays = holidays.Brazil(years=date.year)
+    return date in br_holidays
+
+# Function to calculate the first day of the month based on the reference date
+def get_first_day_of_month(date):
+    res = calendar.monthrange(date.year, date.month)[1]
+    return datetime(date.year, date.month, res)
+
+# Function to get the number of days in the month
+def get_days_in_month(date):
+    return calendar.monthrange(date.year, date.month)[1]
+
+# Function to determine the second working day of the month
+def get_second_working_day_of_month(reference_date):
+    second_day = feriados_funcao(reference_date, 0)
+    return newdt.strptime(second_day, '%d/%m/%Y').date()
+
+# Function to generate month-letter mapping for the first year of future payments
+def generate_first_year_schedule(month, year):
+    month_letter_map = {1: 'F', 2: 'G', 3: 'H', 4: 'J', 5: 'K', 6: 'M', 7: 'N', 8: 'Q', 9: 'U', 10: 'V', 11: 'X', 12: 'Z'}
+    future_months = []
+    future_years = []
+
+    month_temp = month + 1
+    while month_temp <= 12:
+        future_months.append(month_temp)
+        future_years.append(year)
+        month_temp += 1
+
+    while len(future_months) < 12:
+        future_months.append(1)
+        future_years.append(year + 1)
+
+    # Replace month numbers with corresponding letters
+    future_months = [month_letter_map[m] for m in future_months]
+    
+    return pd.DataFrame({'month': future_months, 'year': future_years})
+
+# Function to generate second year payment schedule
+def generate_second_year_schedule(month, year):
+    change_months = [1, 4, 7, 10]
+    future_months = []
+    future_years = []
+    ano2 = year + 1
+    
+    if month in change_months:
+        if month == 1:
+            future_months.extend([4, 7, 10])
+            future_years.extend([ano2] * 3)
+        elif month == 4:
+            future_months.extend([7, 10])
+            future_years.extend([ano2] * 2)
+        elif month == 7:
+            future_months.append(10)
+            future_years.append(ano2)
+        elif month == 10:
+            future_months.extend([1, 4, 7, 10])
+            future_years.extend([ano2] * 4)
+            ano3 = ano2 + 1
+            future_years.extend([ano3] * 4)
+    
+    # Fill remaining months after tri-monthly pattern
+    mes_tri = 1
+    while len(future_months) < 15:
+        future_months.append(mes_tri)
+        future_years.append(ano2)
+        mes_tri += 3
+        if mes_tri > 12:
+            mes_tri = 1
+            ano2 += 1
+
+    return pd.DataFrame({'month': future_months, 'year': future_years})
+
+# Function to generate fifth year payment schedule and beyond
+def generate_fifth_year_schedule(month, year):
+    future_months = []
+    future_years = []
+
+    quinto_ano = year + 1
+    max_year = year + 15
+    if month == 12:
+        max_year = year + 16
+
+    while quinto_ano < max_year:
+        future_months.append(1)
+        future_years.append(quinto_ano)
+        quinto_ano += 1
+
+    return pd.DataFrame({'month': future_months, 'year': future_years})
+
+# Function to concatenate schedules and apply brokerage fees
+def apply_brokerage_fees(df, prices_df):
+    df = df.reset_index(drop=True)
+    price_cte = prices_df['Corretagem'][24]
+    df_brokerage = pd.DataFrame({'payment_due': df['payment_due'], 'brokerage': prices_df['Corretagem']})
+    df_brokerage = df_brokerage.fillna(price_cte)
+    return df_brokerage
+
+# Main execution logic
+def main():
+    # Get the current date
+    current_date = pd.to_datetime(dt.date.today())
+    date_str = newdt.strftime(current_date, '%Y-%m-%d')
+
+    # Check if the reference date is a holiday
+    holiday = check_holiday(date_str)
+    reference_date_str = newdt.strftime(holiday, '%Y-%m-%d')
+
+    # Get the first day of the month
+    first_day_of_month = get_first_day_of_month(current_date)
+    second_working_day = get_second_working_day_of_month(reference_date_str)
+
+    # Generate first year payment schedule
+    df_first_year = generate_first_year_schedule(current_date.month, current_date.year)
+
+    # Generate second year payment schedule
+    df_second_year = generate_second_year_schedule(current_date.month, current_date.year)
+
+    # Generate fifth year and beyond payment schedule
+    df_fifth_year = generate_fifth_year_schedule(current_date.month, current_date.year)
+
+    # Concatenate the payment schedules
+    df_concat = pd.concat([df_first_year, df_second_year, df_fifth_year])
+
+    # Prompt user for the path to the brokerage fees file
+    file_path = input("Enter the path to the brokerage fees file (.xlsx): ")
+
+    # Load brokerage fees from the specified file path
+    try:
+        prices_df = pd.read_excel(file_path)
+    except Exception as e:
+        print(f"Error loading the file: {e}")
+        return
+
+    # Apply brokerage fees to the concatenated schedule
+    df_with_brokerage = apply_brokerage_fees(df_concat, prices_df)
+
+    print(df_with_brokerage)
+
+if __name__ == "__main__":
+    main()
